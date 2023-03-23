@@ -52,6 +52,7 @@ contract Bankless is ReentrancyGuard {
     function withdraw(bytes32 _uniqueChars, address payable _wallet, address _depositAddress, uint _amount) public nonReentrant{
         require(charToAddress[_uniqueChars] == _depositAddress, "Invalid unique characters or deposit address");
         require(_wallet != address(0), "Invalid wallet address");
+        require(_wallet == msg.sender,"The connected wallet address should be the withdrawal address");
         require(balances[_depositAddress] >= _amount, "Insufficient balance");
         require(_amount > 0, "Invalid amount");
         require(_depositAddress != msg.sender, "Withdrawal address must be different from deposit address");
