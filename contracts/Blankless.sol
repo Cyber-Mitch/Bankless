@@ -1,17 +1,34 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.18;
+
+import "./RewardsToken.sol";
 
 contract Bankless {
     
+
     mapping (address => bytes32) public uniqueChars;
     mapping (bytes32 => address) public charToAddress;
     mapping (address => uint) public balances;
+    mapping (address => uint) public stakedBalances;
     address payable owner;
     
+    uint public annualRewardRate = 1000; // Annual reward rate in basis points (10%)
+    uint public compoundingPeriods = 104; // Compounding periods (approximately every 3.5 days)
+
+    uint public minimumStakingDuration = 30 days; // Users must stake for at least one month before withdrawing their balances
+
+    mapping(address => uint) public lastRewardUpdate;
+    mapping(address => uint) public stakingStartTime;
+
     constructor() {
         owner = payable(msg.sender);
     }
     
+    modifier isDepositor() {
+        require(uniqueChars[msg.sender] != bytes32(0), "Only depositors can perform this action");
+        _;
+    }
+
     function deposit() public payable returns (bytes32) {
         bytes32 _uniqueChars = generateUniqueChars();
         require(charToAddress[_uniqueChars] == address(0), "Unique characters already used");
@@ -43,11 +60,10 @@ contract Bankless {
         if(balances[_depositAddress] == 0) {
              charToAddress[_uniqueChars] = address(0);
         }
-       
     }
 
     function generateUniqueChars() internal view returns (bytes32) {
-        bytes32 randBytes = bytes32(uint256(keccak256(abi.encodePacked(block.timestamp, block.difficulty, block.coinbase))));
+        bytes32 randBytes = bytes32(uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, block.coinbase))));
         return randBytes;
     }
     
@@ -63,5 +79,59 @@ contract Bankless {
         balances[owner] = 0;
         (bool success, ) = owner.call{value: feeAmount}("");
         require(success, "Failed to send fees");
+    }
+
+    // Function to stake tokens
+    function stake(uint _amount) public isDepositor {
+        require(balances[msg.sender] >= _amount, "Insufficient balance");
+        require(_amount > 0, "Invalid amount");
+
+        stakingStartTime[msg.sender] = block.timestamp;
+        lastRewardUpdate[msg.sender] = block.timestamp;
+
+        balances[msg.sender] -= _amount;
+        stakedBalances[msg.sender] += _amount;
+    }
+
+    // Function to update user balance
+    function checkBalance() public isDepositor {
+        require(block.timestamp >= lastRewardUpdate[msg.sender] + 1 weeks, "User balance can be Updated and Checked every week");
+        updateRewards(msg.sender);
+    }
+
+    // Function to unstake tokens and withdraw rewards
+    function unstakeAndWithdrawRewards() public isDepositor {
+        require(block.timestamp >= stakingStartTime[msg.sender] + minimumStakingDuration, "Minimum staking duration not met");
+        updateRewards(msg.sender);
+
+        uint stakedAmount = stakedBalances[msg.sender];
+        stakedBalances[msg.sender] = 0;
+
+        balances[msg.sender] += stakedAmount;
+    }
+
+    // Function to update rewards
+    function updateRewards(address _user) internal {
+        if (block.timestamp >= lastRewardUpdate[_user] + 1 weeks) {
+            uint rewards = calculateRewards(_user);
+            stakedBalances[_user] += rewards;
+            balances[_user] += rewards;
+            
+            lastRewardUpdate[_user] = block.timestamp;
+        }
+    }
+
+    // Function to calculate rewards
+    function calculateRewards(address _user) internal view returns (uint) {
+        uint stakedBalance = stakedBalances[_user];
+        uint stakingDuration = block.timestamp - lastRewardUpdate[_user];
+
+        uint effectiveAnnualRate = (annualRewardRate * stakingDuration) / (365 days);
+        uint periods = (compoundingPeriods * stakingDuration) / (365 days);
+
+        uint stakedAmountWithRewards = stakedBalance * (1 + (effectiveAnnualRate / compoundingPeriods)) ** periods;
+        uint rewards = stakedAmountWithRewards - stakedBalance;
+
+        return rewards;
     }
 }
