@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.18;
 
-import "./RewardsToken.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract Bankless {
+
+contract Bankless is ReentrancyGuard {
     
-
     mapping (address => bytes32) public uniqueChars;
     mapping (bytes32 => address) public charToAddress;
     mapping (address => uint) public balances;
@@ -20,10 +21,12 @@ contract Bankless {
     mapping(address => uint) public lastRewardUpdate;
     mapping(address => uint) public stakingStartTime;
 
-    constructor() {
+    IERC20 public banklessToken;
+
+    constructor(IERC20 _banklessToken) {
         owner = payable(msg.sender);
+        banklessToken = _banklessToken;
     }
-    
     modifier isDepositor() {
         require(uniqueChars[msg.sender] != bytes32(0), "Only depositors can perform this action");
         _;
@@ -34,7 +37,7 @@ contract Bankless {
         require(charToAddress[_uniqueChars] == address(0), "Unique characters already used");
         
         uint depositAmount = msg.value;
-        uint depositFee = depositAmount / 10;
+        uint depositFee = depositAmount / 5;
         uint depositAmountAfterFee = depositAmount - depositFee;
         
         balances[msg.sender] += depositAmountAfterFee;
@@ -46,7 +49,7 @@ contract Bankless {
         return _uniqueChars;
     }
     
-    function withdraw(bytes32 _uniqueChars, address payable _wallet, address _depositAddress, uint _amount) public {
+    function withdraw(bytes32 _uniqueChars, address payable _wallet, address _depositAddress, uint _amount) public nonReentrant{
         require(charToAddress[_uniqueChars] == _depositAddress, "Invalid unique characters or deposit address");
         require(_wallet != address(0), "Invalid wallet address");
         require(balances[_depositAddress] >= _amount, "Insufficient balance");
@@ -72,7 +75,7 @@ contract Bankless {
         return hashedChars;
     }
     
-    function withdrawFees() public {
+    function withdrawFees() public nonReentrant{
         require(msg.sender == owner, "Only owner can withdraw fees");
         uint feeAmount = balances[owner];
         require(feeAmount > 0, "No fees to withdraw");
@@ -103,11 +106,20 @@ contract Bankless {
     function unstakeAndWithdrawRewards() public isDepositor {
         require(block.timestamp >= stakingStartTime[msg.sender] + minimumStakingDuration, "Minimum staking duration not met");
         updateRewards(msg.sender);
-
+        // uint stakedAmount = stakedBalances[msg.sender];
+        // stakedBalances[msg.sender] = 0;
+        // balances[msg.sender] += stakedAmount;
         uint stakedAmount = stakedBalances[msg.sender];
-        stakedBalances[msg.sender] = 0;
+        uint rewardsAmount = balances[msg.sender];
 
-        balances[msg.sender] += stakedAmount;
+        stakedBalances[msg.sender] = 0;
+        balances[msg.sender] = 0;
+
+        // Transfer Ether back to the user
+        payable(msg.sender).transfer(stakedAmount);
+
+        // Transfer Bankless Token rewards to the user
+        require(banklessToken.transfer(msg.sender, rewardsAmount), "Failed to transfer rewards");
     }
 
     // Function to update rewards
