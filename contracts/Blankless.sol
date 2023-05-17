@@ -37,7 +37,7 @@ contract Bankless is ReentrancyGuard {
         require(charToAddress[_uniqueChars] == address(0), "Unique characters already used");
         
         uint depositAmount = msg.value;
-        uint depositFee = depositAmount / 5;
+        uint depositFee = depositAmount / 20; // a 5% fee is removed from the initial deposite
         uint depositAmountAfterFee = depositAmount - depositFee;
         
         balances[msg.sender] += depositAmountAfterFee;
